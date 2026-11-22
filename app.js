@@ -18,7 +18,7 @@ const OVERPASS_MIRRORS = [
   'https://overpass.private.coffee/api/interpreter',
 ];
 
-const MAX_RESULTATEN = 25; // toon alleen de belangrijkste attracties
+const MAX_RESULTATEN = 25; // toon de dichtstbijzijnde resultaten
 
 const KAARTCENTRUM = [52.3702, 4.8952]; // Amsterdam als startpunt
 
@@ -127,6 +127,7 @@ let startpunt = null; // { lat, lon, naam }
 let pois = [];
 let markersById = new Map();
 let kiesModus = false;
+let zoekGeneratie = 0;
 
 /* ------- helperfuncties ------- */
 
@@ -201,28 +202,6 @@ function besteNaam(element, label) {
   return t['name:nl'] || t.name || t.brand || `${label} (naam onbekend)`;
 }
 
-/* Belangrijkheid: toeristische trekpleisters wegen zwaarder,
- * versterkt door aanvullende informatie zoals Wikipedia of een website. */
-const KERN_TAGS = {
-  tourism: new Set(['attraction', 'museum', 'theme_park', 'zoo', 'aquarium', 'viewpoint']),
-  historic: new Set(['castle', 'monument', 'fort', 'ruins', 'battlefield']),
-  man_made: new Set(['lighthouse', 'windmill']),
-  natural: new Set(['waterfall', 'cave_entrance']),
-};
-
-function belangrijkheid(tags) {
-  let score = 0;
-  for (const [groep, kernen] of Object.entries(KERN_TAGS)) {
-    if (kernen.has(tags[groep])) score += 3;
-  }
-  if (tags.wikipedia || tags['wikipedia:nl'] || tags.wikidata) score += 2;
-  if (tags.website || tags['contact:website']) score += 2;
-  if (tags['name:nl'] || tags.name) score += 1;
-  if (tags.opening_hours) score += 1;
-  if (tags.description || tags['description:nl']) score += 1;
-  return score;
-}
-
 /* Windrichting in het Nederlands. */
 const RICHTINGEN = ['noorden', 'noordoosten', 'oosten', 'zuidoosten', 'zuiden', 'zuidwesten', 'westen', 'noordwesten'];
 
@@ -263,41 +242,74 @@ function isZelfdeOnderwerp(query, resultTitel) {
   return woorden(resultTitel).some((w) => q.has(w));
 }
 
+/* Zoek de Nederlandstalige tegenhanger van een buitenlands artikel. */
+async function nederlandseTegenhanger(lang, titel) {
+  if (lang === 'nl') return { lang: 'nl', titel };
+  const params = new URLSearchParams({
+    action: 'query',
+    titles: titel,
+    prop: 'langlinks',
+    lllang: 'nl',
+    format: 'json',
+    formatversion: '2',
+    redirects: '1',
+  });
+  try {
+    const data = await haalJson(`https://${lang}.wikipedia.org/w/api.php?${params}`, {}, 15000);
+    const link = data.query?.pages?.[0]?.langlinks?.[0];
+    if (link?.title) return { lang: 'nl', titel: link.title };
+  } catch (fout) {
+    console.error(fout);
+  }
+  return null;
+}
+
+async function wikiSamenvattingVoor(lang, titel) {
+  const key = `${lang}:${titel.toLowerCase()}`;
+  if (wikiCache.has(key)) return wikiCache.get(key);
+  try {
+    const params = new URLSearchParams({ redirect: 'true' });
+    const data = await haalJson(
+      `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(titel.replace(/ /g, '_'))}?${params}`,
+      {},
+      15000,
+    );
+    const extract = (data.extract || '').trim();
+    const gevonden = data.title || titel;
+    if (extract && data.type !== 'disambiguation' && isZelfdeOnderwerp(titel, gevonden)) {
+      const info = {
+        extract,
+        url: data.content_urls?.desktop?.page || wikiArtikelUrl(lang, gevonden),
+      };
+      wikiCache.set(key, info);
+      return info;
+    }
+    wikiCache.set(key, null);
+    return null;
+  } catch (fout) {
+    wikiCache.set(key, null);
+    return null;
+  }
+}
+
 async function haalWikiSamenvatting(p) {
   const uitTags = wikiVanTags(p.tags);
   const pogingen = [];
   if (uitTags) {
-    pogingen.push({ lang: uitTags.lang, titel: uitTags.titel });
-    if (uitTags.lang !== 'nl') pogingen.push({ lang: 'nl', titel: uitTags.titel });
+    pogingen.push({ lang: 'nl', titel: uitTags.titel });
+    if (uitTags.lang !== 'nl') pogingen.push(uitTags);
   }
   pogingen.push({ lang: 'nl', titel: p.naam });
 
   for (const poging of pogingen) {
-    const key = `${poging.lang}:${poging.titel.toLowerCase()}`;
-    if (wikiCache.has(key)) {
-      const c = wikiCache.get(key);
-      if (c) return c;
-      continue;
+    const info = await wikiSamenvattingVoor(poging.lang, poging.titel);
+    if (!info) continue;
+    if (poging.lang !== 'nl') {
+      const tegenhanger = await nederlandseTegenhanger(poging.lang, poging.titel);
+      const nlInfo = tegenhanger ? await wikiSamenvattingVoor('nl', tegenhanger.titel) : null;
+      if (nlInfo) return nlInfo;
     }
-    try {
-      const params = new URLSearchParams({ redirect: 'true' });
-      const data = await haalJson(
-        `https://${poging.lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(poging.titel.replace(/ /g, '_'))}?${params}`,
-        {},
-        15000,
-      );
-      const extract = (data.extract || '').trim();
-      const titel = data.title || poging.titel;
-      if (extract && data.type !== 'disambiguation' && isZelfdeOnderwerp(poging.titel, titel)) {
-        const url = data.content_urls?.desktop?.page || wikiArtikelUrl(poging.lang, titel);
-        const info = { extract, url };
-        wikiCache.set(key, info);
-        return info;
-      }
-      wikiCache.set(key, null);
-    } catch (fout) {
-      wikiCache.set(key, null);
-    }
+    return info;
   }
   return null;
 }
@@ -588,7 +600,12 @@ async function zoekInGebied() {
   const metCampers = $id('toon-campers').checked;
   const knop = $id('btn-opnieuw');
   knop.disabled = true;
-  setBericht(`Bezienswaardigheden & camperplaatsen binnen ${radiusKm} km laden…`, true);
+  zoekGeneratie++;
+  pois = [];
+  $id('resultaten').innerHTML = '';
+  $id('aantal').textContent = String(0);
+  tekenMarkers();
+  setBericht(`Bezienswaardigheden \u0026 camperplaatsen binnen ${radiusKm} km laden…`, true);
 
   const query = bouwOverpassQuery(radiusKm * 1000, startpunt.lat, startpunt.lon, metCampers);
   const laadstart = Date.now();
@@ -635,20 +652,19 @@ async function zoekInGebied() {
         icoon: poiIcoon(tags),
         tags,
         isCamper: camper,
-        score: belangrijkheid(tags),
         kosten: kostenTekst(tags, camper),
         afstandKm: lat !== undefined ? hemelsbreedKm(startpunt.lat, startpunt.lon, lat, lon) : Infinity,
       };
     })
     .filter((p) => p.nauwkeurig && p.afstandKm <= radiusKm)
-    .sort((a, b) => b.score - a.score || a.afstandKm - b.afstandKm)
+    .sort((a, b) => a.afstandKm - b.afstandKm)
     .slice(0, MAX_RESULTATEN);
 
   tekenResultaten();
   tekenMarkers();
 
   let tekst = pois.length
-    ? `De ${pois.length} belangrijkste attracties en camperplaatsen binnen ${radiusKm} km.`
+    ? `De ${pois.length} dichtstbijzijnde resultaten binnen ${radiusKm} km (gesorteerd op afstand).`
     : 'Geen resultaten binnen deze straal. Probeer een grotere straal of een andere locatie.';
   if (!pois.length) {
     tekst += ` <a href="${overpassTurboLink(query)}" target="_blank" rel="noopener">Bekijk de query in Overpass Turbo</a>.`;
@@ -721,19 +737,21 @@ function tekenResultaten() {
   if (paginaAutoBeschrijvingen !== null) {
     window.clearTimeout(paginaAutoBeschrijvingen);
   }
-  paginaAutoBeschrijvingen = window.setTimeout(() => vulBeschrijvingenAan(), 150);
+  const generatie = zoekGeneratie;
+  paginaAutoBeschrijvingen = window.setTimeout(() => vulBeschrijvingenAan(generatie), 150);
 }
 
 let paginaAutoBeschrijvingen = null;
 
 /* Vult per zichtbaar resultaat een echte beschrijving aan vanuit Wikipedia,
  * met meerdere parallelle opvragers zodat de lijst snel volloopt. */
-async function vulBeschrijvingenAan() {
+async function vulBeschrijvingenAan(generatie) {
+  if (generatie !== undefined && generatie !== zoekGeneratie) return;
   const wachtrij = zichtbarePois().filter((p) => p.nauwkeurig);
   let index = 0;
 
   async function werker() {
-    while (index < wachtrij.length) {
+    while (generatie === zoekGeneratie && index < wachtrij.length) {
       const p = wachtrij[index++];
       const info = gecachteSamenvatting(p) || (await haalWikiSamenvatting(p));
       if (!info) continue;
