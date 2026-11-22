@@ -54,15 +54,22 @@ python3 -m http.server 8000
 
 ## Publiceren (GitHub Pages)
 
-1. Ga in GitHub naar **Settings → Pages**.
-2. Kies bij *Source* voor **Deploy from a branch**, branch `main`, map `/ (root)`.
-3. Na enkele ogenblikken staat de app op `https://josbus1961.github.io/vakantie-app/`.
+De workflow `.github/workflows/deploy-pages.yml` publiceert de site automatisch:
+
+- bij elke push naar `main` (en handmatig via **Run workflow** op het tabblad *Actions*),
+- de Pages-bron wordt door de workflow zelf op **GitHub Actions** gezet (geen handmatige instelling nodig),
+- na het mergen staat de app op `https://josbus1961.github.io/vakantie-app/`.
+
+> Eerste keer: ga naar het tabblad **Actions**, kies de run "Publiceer site naar GitHub Pages"
+> en bevestig onder **Settings → Environments → github-pages** zo nodig de deployment.
+> Als de repo privé is, is Pages beschikbaar op een betaald GitHub-plan.
 
 ## Bestanden
 
 - `index.html` – paginastructuur (Nederlands, `lang="nl"`)
 - `style.css` – opmaak, donker thema, mobiel-responsief
 - `app.js` – alle logica: locatie, Overpass-queries, filters, kaart, weer, routes
+- `.github/workflows/deploy-pages.yml` – automatische publicatie naar GitHub Pages
 
 ## Data en eerlijk gebruik
 
