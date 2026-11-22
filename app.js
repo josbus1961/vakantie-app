@@ -224,19 +224,112 @@ function windrichting(lat1, lon1, lat2, lon2) {
   return RICHTINGEN[Math.round((graden + 360) % 360 / 45) % 8];
 }
 
+/* ------- Wikipedia: echte beschrijving + detailwebpagina ------- */
+
+const wikiCache = new Map(); // "lang:titel" -> { extract, url }
+
+function wikiVanTags(tags) {
+  const waarde = tags['wikipedia:nl'] || tags.wikipedia;
+  if (!waarde || !/[a-zA-Z]/.test(waarde)) return null;
+  const idx = waarde.indexOf(':');
+  return /^[a-z-]+$/.test(waarde.slice(0, idx))
+    ? { lang: waarde.slice(0, idx), titel: waarde.slice(idx + 1) }
+    : { lang: 'nl', titel: waarde };
+}
+
+function wikiArtikelUrl(lang, titel) {
+  return `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(titel.trim().replace(/ /g, '_'))}`;
+}
+
+function isZelfdeOnderwerp(query, resultTitel) {
+  const woorden = (tekst) =>
+    tekst
+      .toLowerCase()
+      .split(/[^a-z0-9\u00c0-\u017f']+/)
+      .filter((w) => w.length > 3);
+  const q = new Set(woorden(query));
+  if (!q.size) return false;
+  return woorden(resultTitel).some((w) => q.has(w));
+}
+
+async function haalWikiSamenvatting(p) {
+  const uitTags = wikiVanTags(p.tags);
+  const pogingen = [];
+  if (uitTags) {
+    pogingen.push({ lang: uitTags.lang, titel: uitTags.titel });
+    if (uitTags.lang !== 'nl') pogingen.push({ lang: 'nl', titel: uitTags.titel });
+  }
+  pogingen.push({ lang: 'nl', titel: p.naam });
+
+  for (const poging of pogingen) {
+    const key = `${poging.lang}:${poging.titel.toLowerCase()}`;
+    if (wikiCache.has(key)) {
+      const c = wikiCache.get(key);
+      if (c) return c;
+      continue;
+    }
+    try {
+      const params = new URLSearchParams({ redirect: 'true' });
+      const data = await haalJson(
+        `https://${poging.lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(poging.titel.replace(/ /g, '_'))}?${params}`,
+      );
+      const extract = (data.extract || '').trim();
+      const titel = data.title || poging.titel;
+      if (extract && data.type !== 'disambiguation' && isZelfdeOnderwerp(poging.titel, titel)) {
+        const url = data.content_urls?.desktop?.page || wikiArtikelUrl(poging.lang, titel);
+        const info = { extract, url };
+        wikiCache.set(key, info);
+        return info;
+      }
+      wikiCache.set(key, null);
+    } catch (fout) {
+      wikiCache.set(key, null);
+    }
+  }
+  return null;
+}
+
+function gecachteSamenvatting(p) {
+  const uitTags = wikiVanTags(p.tags);
+  const pogingen = [];
+  if (uitTags) {
+    pogingen.push(`${uitTags.lang}:${uitTags.titel.toLowerCase()}`);
+    if (uitTags.lang !== 'nl') pogingen.push(`nl:${uitTags.titel.toLowerCase()}`);
+  }
+  pogingen.push(`nl:${p.naam.toLowerCase()}`);
+  for (const key of pogingen) {
+    if (wikiCache.has(key) && wikiCache.get(key)) return wikiCache.get(key);
+  }
+  return null;
+}
+
+function detailUrlVoor(p) {
+  const uitTags = wikiVanTags(p.tags);
+  if (uitTags) return wikiArtikelUrl(uitTags.lang, uitTags.titel);
+  return `https://duckduckgo.com/?q=${encodeURIComponent(`${p.naam} ${startpunt ? startpunt.naam : ''}`)}`;
+}
+
+function detailLabel(p) {
+  return wikiVanTags(p.tags) ? '📖 Wikipedia' : 'ℹ️ Detailinformatie';
+}
+
+function kortSamenvatting(extract, maximaal = 260) {
+  if (extract.length <= maximaal) return extract;
+  const afgekapt = extract.slice(0, maximaal);
+  return afgekapt.slice(0, afgekapt.lastIndexOf('.') + 1 || afgekapt.length) + ' …';
+}
+
 /* Duidelijke beschrijving van drie regels per resultaat. */
-function beschrijving(p) {
+function beschrijving(p, extract) {
   const t = p.tags;
 
-  const soortBijzin = {
-    attracties: 'om tijdens je vakantie te bezoeken',
-    historie: 'met een verhaal uit het verleden',
-    natuur: 'voor een wandeling of een mooi gezicht',
-    campers: 'voor een rustige overnachting met de camper',
-  }[p.categorie] || 'om tijdens je vakantie te bezoeken';
-  let regel1 = `Een ${p.label.toLowerCase()} ${soortBijzin}.`;
   const eigenTekst = t['description:nl'] || t.description;
-  if (eigenTekst) regel1 = `${eigenTekst.trim().replace(/\s+$/, '')}`;
+  const regel1 = extract
+    ? kortSamenvatting(extract)
+    : eigenTekst
+      ? kortSamenvatting(eigenTekst.trim())
+      : null;
+  const beschrijvingTekst = regel1 ? `${regel1}<br>` : '';
 
   const richting = startpunt ? windrichting(startpunt.lat, startpunt.lon, p.lat, p.lon) : null;
   let regel2 = richting
@@ -259,7 +352,7 @@ function beschrijving(p) {
   const heel = samengevat && !kostenKern
     ? kap(samengevat)
     : samengevat || 'Kosten en openingstijden niet bekend; raadpleeg ter plaatse een informatiebord.';
-  return `${regel1}<br>${regel2}<br>${heel}`;
+  return `${beschrijvingTekst}${regel2}<br>${heel}`;
 }
 
 function isCamper(p) {
@@ -546,9 +639,10 @@ function tekenResultaten() {
     li.innerHTML = `
       <div class="titel">${p.icoon} ${p.naam}</div>
       <div class="type">${p.label}</div>
-      <div class="beschrijving">${beschrijving(p)}</div>
+      <div class="beschrijving" id="beschrijving-${p.id.replace(/\//g, '_')}">${beschrijving(p, gecachteSamenvatting(p)?.extract)}</div>
       ${website}
       <div class="actierij">
+        <a href="${detailUrlVoor(p)}" target="_blank" rel="noopener">${detailLabel(p)}</a>
         <button type="button" class="btn-route">🛣️ Route afstand</button>
         <a href="https://www.google.com/maps/dir/?api=1&origin=${startpunt.lat},${startpunt.lon}&destination=${p.lat},${p.lon}&travelmode=driving"
            target="_blank" rel="noopener">🧭 Navigeren</a>
@@ -565,6 +659,23 @@ function tekenResultaten() {
       $id('kaarthouder').scrollIntoView({ behavior: 'smooth' });
     });
     li.querySelector('.btn-route').addEventListener('click', (e) => haalRoute(p, e.target));
+  }
+  if (paginaAutoBeschrijvingen !== null) {
+    window.clearTimeout(paginaAutoBeschrijvingen);
+  }
+  paginaAutoBeschrijvingen = window.setTimeout(() => vulBeschrijvingenAan(), 150);
+}
+
+let paginaAutoBeschrijvingen = null;
+
+/* Vult per zichtbaar resultaat een echte beschrijving aan vanuit Wikipedia. */
+async function vulBeschrijvingenAan() {
+  for (const p of zichtbarePois()) {
+    const info = gecachteSamenvatting(p) || (await haalWikiSamenvatting(p));
+    if (!info) continue;
+    const el = document.getElementById(`beschrijving-${p.id.replace(/\//g, '_')}`);
+    if (el) el.innerHTML = beschrijving(p, info.extract);
+    await new Promise((r) => window.setTimeout(r, 120));
   }
 }
 
@@ -619,7 +730,8 @@ function tekenMarkers() {
       `<b>${p.icoon} ${p.naam}</b><br>
        <span class="muted">${p.label}</span><br>
        ${kosten}
-       <div>📍 ${formatKm(p.afstandKm)} hemelsbreed</div>`,
+       <div>📍 ${formatKm(p.afstandKm)} hemelsbreed</div>
+       <div><a href="${detailUrlVoor(p)}" target="_blank" rel="noopener">${detailLabel(p)}</a></div>`,
     );
     markersById.set(p.id, marker);
   }

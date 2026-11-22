@@ -26,6 +26,9 @@ in het Nederlands.
   (`charge`, `maxstay`, capaciteit). Onbekende kosten worden eerlijk als "kosten onbekend" getoond.
 - **Weer**: actuele 3-daagse verwachting (temperatuur, neerslagkans, wind) met Nederlandse
   omschrijvingen van de weersomstandigheden.
+- **Beschrijving & detailinformatie**: per resultaat een echte omschrijving van de attractie
+  zelf (uit Wikipedia, Nederlands waar mogelijk) plus een weblink met detailinformatie
+  (Wikipedia-artikel of – zonder Wikipedia-referentie – een gerichte zoeklink).
 
 ## Gebruikte bronnen (allemaal gratis, geen API-sleutel)
 
@@ -35,6 +38,7 @@ in het Nederlands.
 | Locatie zoeken | [Nominatim](https://nominatim.org/) | `accept-language=nl` |
 | Routeafstand | [OSRM](https://project-osrm.org/) (demo-server) | afstand/tijd in NL-notatie |
 | Weer | [Open-Meteo](https://open-meteo.com/) | WMO-weercodes → Nederlandse omschrijvingen |
+| Beschrijvingen | [Wikipedia REST API](https://www.mediawiki.org/wiki/REST_API) via OSM-`wikipedia`-tags of naam-overeenkomst | samenvatting uit de Nederlandstalige Wikipedia |
 
 ## Starten
 
