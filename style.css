@@ -142,6 +142,8 @@ button:disabled { opacity: .55; cursor: wait; }
 #weer .temp-laag { color: var(--accent-2); }
 
 #filters { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 8px; }
+.routemodus { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; margin: 6px 0; }
+.routemodus > span { font-size: .85rem; }
 
 #resultaten { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 

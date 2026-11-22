@@ -186,10 +186,7 @@ function typeLabel(tags) {
 }
 
 function categorie(tags) {
-  if (tags.tourism === 'caravan_site' || tags.tourism === 'camp_site') return 'campers';
-  if (tags.historic || (tags.man_made && tags.man_made !== 'pier')) return 'historie';
-  if (tags.natural || tags.leisure) return 'natuur';
-  return 'attracties';
+  return tags.tourism === 'caravan_site' || tags.tourism === 'camp_site' ? 'campers' : 'attracties';
 }
 
 function poiIcoon(tags) {
@@ -328,14 +325,9 @@ function gecachteSamenvatting(p) {
   return null;
 }
 
-function detailUrlVoor(p) {
-  const uitTags = wikiVanTags(p.tags);
-  if (uitTags) return wikiArtikelUrl(uitTags.lang, uitTags.titel);
-  return `https://duckduckgo.com/?q=${encodeURIComponent(`${p.naam} ${startpunt ? startpunt.naam : ''}`)}`;
-}
-
-function detailLabel(p) {
-  return wikiVanTags(p.tags) ? '📖 Wikipedia' : 'ℹ️ Detailinformatie';
+/* Vervoersmiddel voor de routeberekening: per auto of te voet. */
+function routeModus() {
+  return $id('route-voet').checked ? 'voet' : 'auto';
 }
 
 function kortSamenvatting(extract, maximaal = 260) {
@@ -543,10 +535,6 @@ function bouwOverpassQuery(radiusM, lat, lon, metCampers) {
   const bbox = `${lat - dLat},${lon - dLon},${lat + dLat},${lon + dLon}`;
   const attracties = [
     '["tourism"~"^(attraction|museum|viewpoint|gallery|zoo|theme_park|aquarium|artwork)$"]',
-    '["historic"~"^(monument|memorial|castle|ruins|fort|archaeological_site| battlefield)$"]'.replace(' ', ''),
-    '["man_made"~"^(lighthouse|windmill|watermill|tower|pier)$"]',
-    '["natural"~"^(beach|peak|cave_entrance|spring|waterfall|cliff|volcano|geyser|dune|rock)$"]',
-    '["leisure"~"^(park|garden|nature_reserve|water_park)$"]',
   ].map((s) => `nwr${s};`);
   const camper = metCampers
     ? ['nwr["tourism"="caravan_site"];', 'nwr["tourism"="camp_site"];', 'nwr["amenity"="parking"]["motorhome"~"^(yes|designated)$"];'].join('')
@@ -605,14 +593,14 @@ async function zoekInGebied() {
   $id('resultaten').innerHTML = '';
   $id('aantal').textContent = String(0);
   tekenMarkers();
-  setBericht(`Bezienswaardigheden \u0026 camperplaatsen binnen ${radiusKm} km laden…`, true);
+  setBericht(`Toeristische attracties & camperplaatsen binnen ${radiusKm} km laden…`, true);
 
   const query = bouwOverpassQuery(radiusKm * 1000, startpunt.lat, startpunt.lon, metCampers);
   const laadstart = Date.now();
   const klok = window.setInterval(() => {
     const sec = Math.round((Date.now() - laadstart) / 1000);
     setBericht(
-      `Bezienswaardigheden & camperplaatsen binnen ${radiusKm} km laden… (${sec} s)`,
+      `Toeristische attracties & camperplaatsen binnen ${radiusKm} km laden… (${sec} s)`,
       true,
     );
   }, 1000);
@@ -716,9 +704,8 @@ function tekenResultaten() {
       <div class="beschrijving" id="beschrijving-${p.id.replace(/\//g, '_')}">${beschrijving(p, gecachteSamenvatting(p)?.extract)}</div>
       ${website}
       <div class="actierij">
-        <a href="${detailUrlVoor(p)}" target="_blank" rel="noopener">${detailLabel(p)}</a>
         <button type="button" class="btn-route">🛣️ Route afstand</button>
-        <a href="https://www.google.com/maps/dir/?api=1&origin=${startpunt.lat},${startpunt.lon}&destination=${p.lat},${p.lon}&travelmode=driving"
+        <a href="https://www.google.com/maps/dir/?api=1&origin=${startpunt.lat},${startpunt.lon}&destination=${p.lat},${p.lon}&travelmode=${routeModus() === 'voet' ? 'walking' : 'driving'}"
            target="_blank" rel="noopener">🧭 Navigeren</a>
       </div>
       <div class="route-uit verbergen"></div>`;
@@ -771,16 +758,18 @@ async function haalRoute(poi, knop) {
   uit.classList.remove('verbergen');
   uit.innerHTML = '<span class="lader"></span> Route berekenen…';
 
-  const url =
-    `https://router.project-osrm.org/route/v1/driving/` +
-    `${startpunt.lon},${startpunt.lat};${poi.lon},${poi.lat}?overview=false`;
+  const voet = routeModus() === 'voet';
+  const basis = voet
+    ? 'https://routing.openstreetmap.de/routed-foot/route/v1/foot/'
+    : 'https://routing.openstreetmap.de/routed-car/route/v1/driving/';
+  const url = `${basis}${startpunt.lon},${startpunt.lat};${poi.lon},${poi.lat}?overview=false`;
   try {
-    const data = await haalJson(url);
+    const data = await haalJson(url, {}, 15000);
     if (!data.routes || !data.routes.length) throw new Error('geen route gevonden');
     const route = data.routes[0];
     const km = route.distance / 1000;
     const min = Math.round(route.duration / 60);
-    uit.innerHTML = `🛣️ Over de weg: <b>${formatKm(km)}</b> · ca. ${min} min reistijd (auto).`;
+    uit.innerHTML = `🛣️ Over de weg: <b>${formatKm(km)}</b> · ca. ${min} min reistijd (${voet ? 'te voet' : 'per auto'}).`;
   } catch (fout) {
     console.error(fout);
     uit.innerHTML = 'Kon de route afstand niet opvragen. Gebruik de navigatielink hierboven.';
@@ -814,8 +803,7 @@ function tekenMarkers() {
       `<b>${p.icoon} ${p.naam}</b><br>
        <span class="muted">${p.label}</span><br>
        ${kosten}
-       <div>📍 ${formatKm(p.afstandKm)} hemelsbreed</div>
-       <div><a href="${detailUrlVoor(p)}" target="_blank" rel="noopener">${detailLabel(p)}</a></div>`,
+       <div>📍 ${formatKm(p.afstandKm)} hemelsbreed</div>`
     );
     markersById.set(p.id, marker);
   }
@@ -886,8 +874,11 @@ function init() {
   $id('toon-campers').addEventListener('change', zoekInGebied);
   $id('btn-opnieuw').addEventListener('click', zoekInGebied);
 
-  ['f-attracties', 'f-historie', 'f-natuur', 'f-campers'].forEach((id) => {
+  ['f-attracties', 'f-campers'].forEach((id) => {
     $id(id).addEventListener('change', filtersToegepast);
+  });
+  ['route-auto', 'route-voet'].forEach((id) => {
+    $id(id).addEventListener('change', tekenResultaten);
   });
 }
 

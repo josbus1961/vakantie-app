@@ -1,10 +1,9 @@
 # vakantie-app
 
 Web-app die rond jouw huidige locatie (of een ingevoerde/gekozen locatie) toeristische
-attracties, bezienswaardigheden en bijzonderheden toont binnen een instelbare straal
-(1–50 km), inclusief gratis overnachtingsplaatsen voor campers, eventuele kosten,
-routeafstand en een 3-daagse weersverwachting. De interface en alle resultaten zijn
-in het Nederlands.
+attracties toont binnen een instelbare straal (1–50 km), inclusief gratis
+overnachtingsplaatsen voor campers, eventuele kosten, routeafstand (per auto of te voet)
+en een 3-daagse weersverwachting. De interface en alle resultaten zijn in het Nederlands.
 
 ## Functionaliteit
 
@@ -13,22 +12,20 @@ in het Nederlands.
   - 🔍 zoekveld voor plaats, adres of postcode (Nominatim, Nederlandse namen),
   - 🗺️ klik op de kaart om een startpunt te kiezen.
 - **Instelbare straal** van 1 tot 50 km met schuifregelaar.
-- **Resultaten** (gesorteerd op afstand, gefilterd per categorie):
+- **Resultaten** (alleen toeristische attracties, gesorteerd op afstand, gefilterd per categorie):
   - Attracties (tourism=attraction, museum, viewpoint, theme_park, zoo, aquarium, artwork, gallery),
-  - Historie (kasteel, monument, ruïne, fort, gedenkteken, opgravingslocatie, molen, vuurtoren, …),
-  - Natuur (strand, park, tuin, natuurgebied, grot, waterval, bergtop, duin, …),
   - 🚐 Camperplaatsen (camperplaatsen/campings én parkeerplaatsen die openstaan voor campers).
 - **Kaart** met locatie-marker en emoji-markers per categorie; klik op een resultaat om naar de plek te vliegen.
 - **Route afstand**: hemelsbrede afstand direct zichtbaar; per resultaat de routeafstand en
-  reistijd over de weg via OSRM, plus een navigatielink (Google Maps).
+  reistijd via OSRM, naar keuze per 🚗 auto of 🚶 te voet (keuzerondjes in het zijpaneel),
+  plus een navigatielink (Google Maps) die het gekozen vervoersmiddel volgt.
 - **Gratis overnachtingsplaatsen voor campers**: camperplaatsen met `fee=no` worden als
   *gratis* gemarkeerd (groen); `fee=yes` als *betaald* (rood) met eventuele toeslag-informatie
   (`charge`, `maxstay`, capaciteit). Onbekende kosten worden eerlijk als "kosten onbekend" getoond.
 - **Weer**: actuele 3-daagse verwachting (temperatuur, neerslagkans, wind) met Nederlandse
   omschrijvingen van de weersomstandigheden.
-- **Beschrijving & detailinformatie**: per resultaat een echte omschrijving van de attractie
-  zelf (uit Wikipedia, Nederlands waar mogelijk) plus een weblink met detailinformatie
-  (Wikipedia-artikel of – zonder Wikipedia-referentie – een gerichte zoeklink).
+- **Beschrijving**: per resultaat een echte omschrijving van de attractie zelf
+  (uit Wikipedia, volledig in het Nederlands via de langlinks-API indien nodig).
 
 ## Gebruikte bronnen (allemaal gratis, geen API-sleutel)
 
@@ -36,7 +33,7 @@ in het Nederlands.
 | --- | --- | --- |
 | Kaart & POI-data | [OpenStreetMap / Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) | `name:nl` gaat vóór `name`; types worden vertaald via een Nederlands labelwoordenboek |
 | Locatie zoeken | [Nominatim](https://nominatim.org/) | `accept-language=nl` |
-| Routeafstand | [OSRM](https://project-osrm.org/) (demo-server) | afstand/tijd in NL-notatie |
+| Routeafstand | [OSRM](https://project-osrm.org/) via de gratis FOSSGIS-servers (auto- en voetprofiel) | afstand/tijd in NL-notatie |
 | Weer | [Open-Meteo](https://open-meteo.com/) | WMO-weercodes → Nederlandse omschrijvingen |
 | Beschrijvingen | [Wikipedia REST API](https://www.mediawiki.org/wiki/REST_API) via OSM-`wikipedia`-tags of naam-overeenkomst | samenvatting uit de Nederlandstalige Wikipedia |
 
