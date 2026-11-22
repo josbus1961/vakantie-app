@@ -159,6 +159,15 @@ button:disabled { opacity: .55; cursor: wait; }
 #resultaten li .titel { font-weight: 700; font-size: .92rem; cursor: pointer; }
 #resultaten li .type { color: var(--accent-2); font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; }
 #resultaten li .afstand { color: var(--muted); margin: 3px 0; }
+#resultaten li .beschrijving {
+  color: var(--tekst);
+  margin: 4px 0 2px;
+  line-height: 1.45;
+}
+#resultaten li .info a { color: var(--accent-2); }
+#resultaten li .info a:visited { color: var(--accent-2); }
+#resultaten li .actierij a { color: var(--tekst); }
+#resultaten li .actierij a:visited { color: var(--tekst); }
 #resultaten li .info { margin: 3px 0; }
 #resultaten li .gratis { color: var(--gratis); font-weight: 700; }
 #resultaten li .betaald { color: var(--betaald); font-weight: 700; }
@@ -178,6 +187,7 @@ button:disabled { opacity: .55; cursor: wait; }
 #resultaten li .actierij a:hover,
 #resultaten li .actierij button:hover { filter: brightness(1.25); }
 
+.leaflet-popup-content a { color: var(--accent-2); }
 .leaflet-popup-content .gratis { color: var(--gratis); font-weight: 700; }
 
 #routekaart-info {
