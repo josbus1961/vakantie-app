@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vakantie-app – Bezienswaardigheden &amp; camperplaatsen</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="paneel">
+    <header>
+      <h1>🏕️ Vakantie-app</h1>
+      <p class="sub">Bezienswaardigheden, bijzonderheden en camperplaatsen in de buurt</p>
+    </header>
+
+    <section class="blok">
+      <button id="btn-locatie" type="button" class="primair">📍 Gebruik mijn huidige locatie</button>
+      <button id="btn-kies-punt" type="button">🗺️ Kies punt op kaart</button>
+
+      <label for="zoekveld">Of zoek een plaats / adres</label>
+      <div class="zoekrij">
+        <input id="zoekveld" type="text" placeholder="bijv. Deventer, 7411ET, Eiffeltoren" autocomplete="off">
+        <button id="btn-zoek" type="button" aria-label="Zoeken">Zoeken</button>
+      </div>
+      <ul id="zoekresultaten" class="verbergen" role="listbox"></ul>
+
+      <div id="huidige-locatie" class="muted klein verbergen"></div>
+    </section>
+
+    <section class="blok">
+      <label for="straal">
+        Zoekstraal: <output id="straal-uit">10</output> km
+      </label>
+      <input id="straal" type="range" min="1" max="50" step="1" value="10">
+      <label class="checkbox">
+        <input id="toon-campers" type="checkbox" checked>
+        Gratis overnachtingsplaatsen voor campers meenemen
+      </label>
+      <button id="btn-opnieuw" type="button" class="secundair">🔄 Zoeken in dit gebied</button>
+    </section>
+
+    <section id="weer" class="blok verbergen">
+      <h2>🌤️ Weer (komende 3 dagen)</h2>
+      <div id="weer-inhoud" class="klein"></div>
+    </section>
+
+    <section class="blok uitgebreid">
+      <h2>📋 Resultaten <span id="aantal" class="badge"></span></h2>
+      <div id="status" class="muted klein">Kies een locatie om te starten.</div>
+      <div id="filters">
+        <label class="checkbox"><input type="checkbox" id="f-attracties" checked> Attracties</label>
+        <label class="checkbox"><input type="checkbox" id="f-historie" checked> Historie</label>
+        <label class="checkbox"><input type="checkbox" id="f-natuur" checked> Natuur</label>
+        <label class="checkbox"><input type="checkbox" id="f-campers" checked> Camperplaatsen</label>
+      </div>
+      <ul id="resultaten"></ul>
+    </section>
+
+    <footer class="klein muted">
+      Bron: OpenStreetMap (Overpass / Nominatim) · Weer: Open-Meteo · Route: OSRM.
+       Content van OpenStreetMap is beschikbaar onder de ODbL-licentie.
+    </footer>
+  </aside>
+
+  <main id="kaarthouder">
+    <div id="kaart"></div>
+    <div id="routekaart-info" class="verbergen"></div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>
