@@ -278,6 +278,8 @@ async function haalWikiSamenvatting(p) {
       const params = new URLSearchParams({ redirect: 'true' });
       const data = await haalJson(
         `https://${poging.lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(poging.titel.replace(/ /g, '_'))}?${params}`,
+        {},
+        15000,
       );
       const extract = (data.extract || '').trim();
       const titel = data.title || poging.titel;
@@ -532,28 +534,40 @@ function bouwOverpassQuery(radiusM, lat, lon, metCampers) {
   const camper = metCampers
     ? ['nwr["tourism"="caravan_site"];', 'nwr["tourism"="camp_site"];', 'nwr["amenity"="parking"]["motorhome"~"^(yes|designated)$"];'].join('')
     : '';
-  return `[out:json][timeout:25][bbox:${bbox}];( ${attracties.join(' ')} ${camper} );out center tags;`;
+  return `[out:json][timeout:25][bbox:${bbox}];( ${attracties.join(' ')} ${camper} );out center;`;
 }
 
 let overpassController = null;
+
+/* Vraag alle mirrors tegelijk op; het eerste geldige antwoord wint. */
+function mirrorPoging(url, query, signal) {
+  const params = new URLSearchParams({ data: query });
+  return haalJson(url, { method: 'POST', body: params, signal }, 25000);
+}
 
 async function overpassVerzoek(query) {
   if (overpassController) overpassController.abort();
   overpassController = new AbortController();
   const huidige = overpassController;
 
-  let laatsteFout;
-  for (const url of OVERPASS_MIRRORS) {
+  try {
+    return await Promise.any(
+      OVERPASS_MIRRORS.map((url) => mirrorPoging(url, query, huidige.signal)),
+    );
+  } catch (fouten) {
     if (huidige !== overpassController) throw new Error('zoekopdracht vervangen door nieuwe');
-    try {
-      const params = new URLSearchParams({ data: query });
-      return await haalJson(url, { method: 'POST', body: params, signal: huidige.signal }, 20000);
-    } catch (fout) {
-      if (fout.name === 'AbortError' && huidige !== overpassController) throw fout;
-      laatsteFout = fout;
-    }
+    const oorzaken = (fouten.errors || [fouten])
+      .map((f) => f.message || String(f))
+      .slice(0, 3)
+      .join(' | ');
+    const fout = new Error(oorzaken || 'onbekende fout');
+    fout.oorzaken = oorzaken;
+    throw fout;
   }
-  throw laatsteFout;
+}
+
+function overpassTurboLink(query) {
+  return `https://overpass-turbo.eu/?Q=${encodeURIComponent(query)}&R`;
 }
 
 async function zoekInGebied() {
@@ -565,16 +579,30 @@ async function zoekInGebied() {
   setBericht(`Bezienswaardigheden & camperplaatsen binnen ${radiusKm} km laden…`, true);
 
   const query = bouwOverpassQuery(radiusKm * 1000, startpunt.lat, startpunt.lon, metCampers);
+  const laadstart = Date.now();
+  const klok = window.setInterval(() => {
+    const sec = Math.round((Date.now() - laadstart) / 1000);
+    setBericht(
+      `Bezienswaardigheden & camperplaatsen binnen ${radiusKm} km laden… (${sec} s)`,
+      true,
+    );
+  }, 1000);
+
   let data;
   try {
     data = await overpassVerzoek(query);
   } catch (fout) {
+    window.clearInterval(klok);
     if (fout.message === 'zoekopdracht vervangen door nieuwe' || fout.name === 'AbortError') return;
     console.error(fout);
-    setBericht('Kon de OpenStreetMap-database (Overpass) niet bereiken. Probeer het over enkele ogenblikken opnieuw.');
+    setBericht(
+      `Kon Overpass niet bereiken: ${fout.oorzaken || fout.message}. ` +
+        `<a href="${overpassTurboLink(query)}" target="_blank" rel="noopener">Test de query in Overpass Turbo</a>.`,
+    );
     knop.disabled = false;
     return;
   }
+  window.clearInterval(klok);
   knop.disabled = false;
 
   pois = dedupliceer(data.elements || [])
@@ -610,6 +638,9 @@ async function zoekInGebied() {
   let tekst = pois.length
     ? `De ${pois.length} belangrijkste attracties en camperplaatsen binnen ${radiusKm} km.`
     : 'Geen resultaten binnen deze straal. Probeer een grotere straal of een andere locatie.';
+  if (!pois.length) {
+    tekst += ` <a href="${overpassTurboLink(query)}" target="_blank" rel="noopener">Bekijk de query in Overpass Turbo</a>.`;
+  }
   if (data.elements.length > pois.length) {
     tekst += ' (gefilterd op toeristische trekpleisters)';
   }
@@ -774,7 +805,7 @@ async function haalWeer(lat, lon) {
     forecast_days: '3',
   });
   try {
-    const data = await haalJson(`https://api.open-meteo.com/v1/forecast?${params}`);
+    const data = await haalJson(`https://api.open-meteo.com/v1/forecast?${params}`, {}, 15000);
     const d = data.daily;
     const formatter = new Intl.DateTimeFormat('nl-NL', { weekday: 'long', day: 'numeric', month: 'short' });
     inhoud.innerHTML = d.time
