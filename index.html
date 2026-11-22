@@ -12,7 +12,7 @@
   <aside id="paneel">
     <header>
       <h1>🏕️ Vakantie-app</h1>
-      <p class="sub">Bezienswaardigheden, bijzonderheden en camperplaatsen in de buurt</p>
+      <p class="sub">Toeristische attracties en camperplaatsen in de buurt</p>
     </header>
 
     <section class="blok">
@@ -38,6 +38,11 @@
         <input id="toon-campers" type="checkbox" checked>
         Gratis overnachtingsplaatsen voor campers meenemen
       </label>
+      <div class="routemodus" role="radiogroup" aria-label="Vervoersmiddel voor de route">
+        <span class="muted klein">Route:</span>
+        <label class="checkbox"><input type="radio" name="route-modus" id="route-auto" checked> 🚗 Auto</label>
+        <label class="checkbox"><input type="radio" name="route-modus" id="route-voet"> 🚶 Te voet</label>
+      </div>
       <button id="btn-opnieuw" type="button" class="secundair">🔄 Zoeken in dit gebied</button>
     </section>
 
@@ -51,8 +56,6 @@
       <div id="status" class="muted klein">Kies een locatie om te starten.</div>
       <div id="filters">
         <label class="checkbox"><input type="checkbox" id="f-attracties" checked> Attracties</label>
-        <label class="checkbox"><input type="checkbox" id="f-historie" checked> Historie</label>
-        <label class="checkbox"><input type="checkbox" id="f-natuur" checked> Natuur</label>
         <label class="checkbox"><input type="checkbox" id="f-campers" checked> Camperplaatsen</label>
       </div>
       <ul id="resultaten"></ul>
