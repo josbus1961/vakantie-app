@@ -154,10 +154,16 @@ function formatKm(km) {
     : `${km.toFixed(km < 10 ? 1 : 0).replace('.', ',')} km`;
 }
 
-async function haalJson(url, opties = {}) {
-  const antw = await fetch(url, opties);
-  if (!antw.ok) throw new Error(`HTTP ${antw.status} bij ${new URL(url).host}`);
-  return antw.json();
+async function haalJson(url, opties = {}, timeoutMs = 0) {
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const antw = await fetch(url, controller ? { ...opties, signal: controller.signal } : opties);
+    if (!antw.ok) throw new Error(`HTTP ${antw.status} bij ${new URL(url).host}`);
+    return await antw.json();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /* Nederlands label voor een OSM-type-tag. */
@@ -513,30 +519,37 @@ async function zoekEnGa() {
 /* ------- Overpass: attracties + camperplaatsen ------- */
 
 function bouwOverpassQuery(radiusM, lat, lon, metCampers) {
+  const dLat = radiusM / 111320;
+  const dLon = radiusM / (111320 * Math.max(Math.cos((lat * Math.PI) / 180), 0.01));
+  const bbox = `${lat - dLat},${lon - dLon},${lat + dLat},${lon + dLon}`;
   const attracties = [
     '["tourism"~"^(attraction|museum|viewpoint|gallery|zoo|theme_park|aquarium|artwork)$"]',
-    '["historic"~"^(monument|memorial|castle|ruins|fort|archaeological_site|battlefield)$"]',
+    '["historic"~"^(monument|memorial|castle|ruins|fort|archaeological_site| battlefield)$"]'.replace(' ', ''),
     '["man_made"~"^(lighthouse|windmill|watermill|tower|pier)$"]',
     '["natural"~"^(beach|peak|cave_entrance|spring|waterfall|cliff|volcano|geyser|dune|rock)$"]',
     '["leisure"~"^(park|garden|nature_reserve|water_park)$"]',
-  ].map((s) => `nwr(around:${radiusM},${lat},${lon})${s};`);
+  ].map((s) => `nwr${s};`);
   const camper = metCampers
-    ? [
-        `nwr(around:${radiusM},${lat},${lon})["tourism"="caravan_site"];`,
-        `nwr(around:${radiusM},${lat},${lon})["tourism"="camp_site"];`,
-        `nwr(around:${radiusM},${lat},${lon})["amenity"="parking"]["motorhome"~"^(yes|designated)$"];`,
-      ].join('')
+    ? ['nwr["tourism"="caravan_site"];', 'nwr["tourism"="camp_site"];', 'nwr["amenity"="parking"]["motorhome"~"^(yes|designated)$"];'].join('')
     : '';
-  return `[out:json][timeout:30];( ${attracties.join(' ')} ${camper} );out center tags;`;
+  return `[out:json][timeout:25][bbox:${bbox}];( ${attracties.join(' ')} ${camper} );out center tags;`;
 }
 
+let overpassController = null;
+
 async function overpassVerzoek(query) {
+  if (overpassController) overpassController.abort();
+  overpassController = new AbortController();
+  const huidige = overpassController;
+
   let laatsteFout;
   for (const url of OVERPASS_MIRRORS) {
+    if (huidige !== overpassController) throw new Error('zoekopdracht vervangen door nieuwe');
     try {
       const params = new URLSearchParams({ data: query });
-      return await haalJson(url, { method: 'POST', body: params });
+      return await haalJson(url, { method: 'POST', body: params, signal: huidige.signal }, 20000);
     } catch (fout) {
+      if (fout.name === 'AbortError' && huidige !== overpassController) throw fout;
       laatsteFout = fout;
     }
   }
@@ -556,6 +569,7 @@ async function zoekInGebied() {
   try {
     data = await overpassVerzoek(query);
   } catch (fout) {
+    if (fout.message === 'zoekopdracht vervangen door nieuwe' || fout.name === 'AbortError') return;
     console.error(fout);
     setBericht('Kon de OpenStreetMap-database (Overpass) niet bereiken. Probeer het over enkele ogenblikken opnieuw.');
     knop.disabled = false;
@@ -586,6 +600,7 @@ async function zoekInGebied() {
         afstandKm: lat !== undefined ? hemelsbreedKm(startpunt.lat, startpunt.lon, lat, lon) : Infinity,
       };
     })
+    .filter((p) => p.nauwkeurig && p.afstandKm <= radiusKm)
     .sort((a, b) => b.score - a.score || a.afstandKm - b.afstandKm)
     .slice(0, MAX_RESULTATEN);
 
@@ -668,15 +683,23 @@ function tekenResultaten() {
 
 let paginaAutoBeschrijvingen = null;
 
-/* Vult per zichtbaar resultaat een echte beschrijving aan vanuit Wikipedia. */
+/* Vult per zichtbaar resultaat een echte beschrijving aan vanuit Wikipedia,
+ * met meerdere parallelle opvragers zodat de lijst snel volloopt. */
 async function vulBeschrijvingenAan() {
-  for (const p of zichtbarePois()) {
-    const info = gecachteSamenvatting(p) || (await haalWikiSamenvatting(p));
-    if (!info) continue;
-    const el = document.getElementById(`beschrijving-${p.id.replace(/\//g, '_')}`);
-    if (el) el.innerHTML = beschrijving(p, info.extract);
-    await new Promise((r) => window.setTimeout(r, 120));
+  const wachtrij = zichtbarePois().filter((p) => p.nauwkeurig);
+  let index = 0;
+
+  async function werker() {
+    while (index < wachtrij.length) {
+      const p = wachtrij[index++];
+      const info = gecachteSamenvatting(p) || (await haalWikiSamenvatting(p));
+      if (!info) continue;
+      const el = document.getElementById(`beschrijving-${p.id.replace(/\//g, '_')}`);
+      if (el) el.innerHTML = beschrijving(p, info.extract);
+    }
   }
+
+  await Promise.all([werker(), werker(), werker()]);
 }
 
 /* ------- route (OSRM) ------- */
