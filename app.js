@@ -18,6 +18,8 @@ const OVERPASS_MIRRORS = [
   'https://overpass.private.coffee/api/interpreter',
 ];
 
+const MAX_RESULTATEN = 25; // toon alleen de belangrijkste attracties
+
 const KAARTCENTRUM = [52.3702, 4.8952]; // Amsterdam als startpunt
 
 const TYPE_LABELS = {
@@ -186,6 +188,82 @@ function poiIcoon(tags) {
 function besteNaam(element, label) {
   const t = element.tags || {};
   return t['name:nl'] || t.name || t.brand || `${label} (naam onbekend)`;
+}
+
+/* Belangrijkheid: toeristische trekpleisters wegen zwaarder,
+ * versterkt door aanvullende informatie zoals Wikipedia of een website. */
+const KERN_TAGS = {
+  tourism: new Set(['attraction', 'museum', 'theme_park', 'zoo', 'aquarium', 'viewpoint']),
+  historic: new Set(['castle', 'monument', 'fort', 'ruins', 'battlefield']),
+  man_made: new Set(['lighthouse', 'windmill']),
+  natural: new Set(['waterfall', 'cave_entrance']),
+};
+
+function belangrijkheid(tags) {
+  let score = 0;
+  for (const [groep, kernen] of Object.entries(KERN_TAGS)) {
+    if (kernen.has(tags[groep])) score += 3;
+  }
+  if (tags.wikipedia || tags['wikipedia:nl'] || tags.wikidata) score += 2;
+  if (tags.website || tags['contact:website']) score += 2;
+  if (tags['name:nl'] || tags.name) score += 1;
+  if (tags.opening_hours) score += 1;
+  if (tags.description || tags['description:nl']) score += 1;
+  return score;
+}
+
+/* Windrichting in het Nederlands. */
+const RICHTINGEN = ['noorden', 'noordoosten', 'oosten', 'zuidoosten', 'zuiden', 'zuidwesten', 'westen', 'noordwesten'];
+
+function windrichting(lat1, lon1, lat2, lon2) {
+  const y = Math.sin(((lon2 - lon1) * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180);
+  const x =
+    Math.cos((lat1 * Math.PI) / 180) * Math.sin((lat2 * Math.PI) / 180) -
+    Math.sin((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.cos(((lon2 - lon1) * Math.PI) / 180);
+  const graden = (Math.atan2(y, x) * 180) / Math.PI;
+  return RICHTINGEN[Math.round((graden + 360) % 360 / 45) % 8];
+}
+
+/* Duidelijke beschrijving van drie regels per resultaat. */
+function beschrijving(p) {
+  const t = p.tags;
+
+  const soortBijzin = {
+    attracties: 'om tijdens je vakantie te bezoeken',
+    historie: 'met een verhaal uit het verleden',
+    natuur: 'voor een wandeling of een mooi gezicht',
+    campers: 'voor een rustige overnachting met de camper',
+  }[p.categorie] || 'om tijdens je vakantie te bezoeken';
+  let regel1 = `Een ${p.label.toLowerCase()} ${soortBijzin}.`;
+  const eigenTekst = t['description:nl'] || t.description;
+  if (eigenTekst) regel1 = `${eigenTekst.trim().replace(/\s+$/, '')}`;
+
+  const richting = startpunt ? windrichting(startpunt.lat, startpunt.lon, p.lat, p.lon) : null;
+  let regel2 = richting
+    ? `Ligt ${formatKm(p.afstandKm)} ten ${richting} van ${startpunt.naam}.`
+    : `Ligt ${formatKm(p.afstandKm)} van het startpunt.`;
+
+  const delen = [];
+  const kostenKern = p.kosten?.gratis === true
+    ? { tekst: isCamper(p) ? 'overnachten gratis' : 'toegang gratis', klas: 'gratis' }
+    : p.kosten?.gratis === false
+      ? { tekst: isCamper(p) ? 'overnachten betaald' : 'toegang betaald', klas: 'betaald' }
+      : null;
+  const kap = (txt) => txt.charAt(0).toUpperCase() + txt.slice(1);
+  if (kostenKern)
+    delen.push(`<span class="${kostenKern.klas}">${kap(kostenKern.tekst)}</span>`);
+  if (t.opening_hours) delen.push(`geopend: ${t.opening_hours}`);
+  if (p.isCamper && t.capacity) delen.push(`${t.capacity} plaatsen`);
+  if (t.wikipedia || t.website || t['contact:website']) delen.push('meer info via de website');
+  const samengevat = delen.length ? `${delen.join(' \u00b7 ')}.` : '';
+  const heel = samengevat && !kostenKern
+    ? kap(samengevat)
+    : samengevat || 'Kosten en openingstijden niet bekend; raadpleeg ter plaatse een informatiebord.';
+  return `${regel1}<br>${regel2}<br>${heel}`;
+}
+
+function isCamper(p) {
+  return p.categorie === 'campers';
 }
 
 /* Kosten-informatie in Nederlands. */
@@ -398,7 +476,7 @@ async function zoekInGebied() {
       const lat = el.lat ?? (el.center ? el.center.lat : undefined);
       const lon = el.lon ?? (el.center ? el.center.lon : undefined);
       const label = typeLabel(tags);
-      const isCamper = categorie(tags) === 'campers';
+      const camper = categorie(tags) === 'campers';
       return {
         id: `${el.type}/${el.id}`,
         lat,
@@ -409,22 +487,26 @@ async function zoekInGebied() {
         categorie: categorie(tags),
         icoon: poiIcoon(tags),
         tags,
-        isCamper,
-        kosten: kostenTekst(tags, isCamper),
+        isCamper: camper,
+        score: belangrijkheid(tags),
+        kosten: kostenTekst(tags, camper),
         afstandKm: lat !== undefined ? hemelsbreedKm(startpunt.lat, startpunt.lon, lat, lon) : Infinity,
       };
     })
-    .sort((a, b) => a.afstandKm - b.afstandKm);
+    .sort((a, b) => b.score - a.score || a.afstandKm - b.afstandKm)
+    .slice(0, MAX_RESULTATEN);
 
   tekenResultaten();
   tekenMarkers();
 
-  let tekst = `${pois.length} resultaten gevonden binnen ${radiusKm} km.`;
+  let tekst = pois.length
+    ? `De ${pois.length} belangrijkste attracties en camperplaatsen binnen ${radiusKm} km.`
+    : 'Geen resultaten binnen deze straal. Probeer een grotere straal of een andere locatie.';
+  if (data.elements.length > pois.length) {
+    tekst += ' (gefilterd op toeristische trekpleisters)';
+  }
   const gratisCampers = pois.filter((p) => p.isCamper && p.kosten && p.kosten.gratis === true).length;
   if (metCampers && gratisCampers) tekst += ` Waarvan ${gratisCampers} gratis camperplaats(en).`;
-  if (!pois.length) {
-    tekst = 'Geen resultaten binnen deze straal. Probeer een grotere straal of een andere locatie.';
-  }
   setBericht(tekst);
 }
 
@@ -457,20 +539,15 @@ function tekenResultaten() {
     if (p.isCamper && p.kosten && p.kosten.gratis === false) li.classList.add('betaald');
 
     const tags = p.tags;
-    const openingstijden = tags.opening_hours ? `<div class="info muted">🕓 ${tags.opening_hours}</div>` : '';
     const website = tags.website || tags['contact:website']
       ? `<div class="info"><a href="${tags.website || tags['contact:website']}" target="_blank" rel="noopener">🌐 Website</a></div>`
       : '';
-    const kosten = p.kosten
-      ? `<div class="info"><span class="${p.kosten.gratis === true ? 'gratis' : p.kosten.gratis === false ? 'betaald' : 'muted'}">${p.kosten.tekst}</span></div>`
-      : '';
-    const capaciteit = p.isCamper && tags.capacity ? `<div class="info muted">🚐 ${tags.capacity} plaatsen</div>` : '';
 
     li.innerHTML = `
       <div class="titel">${p.icoon} ${p.naam}</div>
       <div class="type">${p.label}</div>
-      <div class="afstand">📍 ${formatKm(p.afstandKm)} hemelsbreed van het startpunt</div>
-      ${kosten}${capaciteit}${openingstijden}${website}
+      <div class="beschrijving">${beschrijving(p)}</div>
+      ${website}
       <div class="actierij">
         <button type="button" class="btn-route">🛣️ Route afstand</button>
         <a href="https://www.google.com/maps/dir/?api=1&origin=${startpunt.lat},${startpunt.lon}&destination=${p.lat},${p.lon}&travelmode=driving"
