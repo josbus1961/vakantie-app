@@ -156,7 +156,12 @@ function formatKm(km) {
 
 async function haalJson(url, opties = {}, timeoutMs = 0) {
   const controller = timeoutMs ? new AbortController() : null;
-  const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const timer = timeoutMs
+    ? setTimeout(
+        () => controller.abort(new Error(`geen antwoord binnen ${Math.round(timeoutMs / 1000)} s`)),
+        timeoutMs,
+      )
+    : null;
   try {
     const antw = await fetch(url, controller ? { ...opties, signal: controller.signal } : opties);
     if (!antw.ok) throw new Error(`HTTP ${antw.status} bij ${new URL(url).host}`);
@@ -534,15 +539,17 @@ function bouwOverpassQuery(radiusM, lat, lon, metCampers) {
   const camper = metCampers
     ? ['nwr["tourism"="caravan_site"];', 'nwr["tourism"="camp_site"];', 'nwr["amenity"="parking"]["motorhome"~"^(yes|designated)$"];'].join('')
     : '';
-  return `[out:json][timeout:25][bbox:${bbox}];( ${attracties.join(' ')} ${camper} );out center;`;
+  return `[out:json][timeout:60][bbox:${bbox}];( ${attracties.join(' ')} ${camper} );out center;`;
 }
 
 let overpassController = null;
 
-/* Vraag alle mirrors tegelijk op; het eerste geldige antwoord wint. */
+/* Vraag alle mirrors tegelijk op; het eerste geldige antwoord wint.
+ * Overpass zet verzoeken in de wachtrij bij drukte, dus 45 s geduld +
+ * automatische tweede golf als alle mirrors kuren overlopen. */
 function mirrorPoging(url, query, signal) {
   const params = new URLSearchParams({ data: query });
-  return haalJson(url, { method: 'POST', body: params, signal }, 25000);
+  return haalJson(url, { method: 'POST', body: params, signal }, 45000);
 }
 
 async function overpassVerzoek(query) {
@@ -550,20 +557,25 @@ async function overpassVerzoek(query) {
   overpassController = new AbortController();
   const huidige = overpassController;
 
-  try {
-    return await Promise.any(
-      OVERPASS_MIRRORS.map((url) => mirrorPoging(url, query, huidige.signal)),
-    );
-  } catch (fouten) {
-    if (huidige !== overpassController) throw new Error('zoekopdracht vervangen door nieuwe');
-    const oorzaken = (fouten.errors || [fouten])
-      .map((f) => f.message || String(f))
-      .slice(0, 3)
-      .join(' | ');
-    const fout = new Error(oorzaken || 'onbekende fout');
-    fout.oorzaken = oorzaken;
-    throw fout;
+  let laatstefouten = null;
+  for (let golf = 0; golf < 2; golf++) {
+    try {
+      return await Promise.any(
+        OVERPASS_MIRRORS.map((url) => mirrorPoging(url, query, huidige.signal)),
+      );
+    } catch (fouten) {
+      if (huidige !== overpassController) throw new Error('zoekopdracht vervangen door nieuwe');
+      laatstefouten = fouten;
+      if (golf === 0) await new Promise((r) => window.setTimeout(r, 4000));
+    }
   }
+  const oorzaken = ((laatstefouten && laatstefouten.errors) || [laatstefouten])
+    .map((f) => f.message || String(f))
+    .slice(0, 3)
+    .join(' | ');
+  const fout = new Error(oorzaken || 'onbekende fout');
+  fout.oorzaken = oorzaken;
+  throw fout;
 }
 
 function overpassTurboLink(query) {
